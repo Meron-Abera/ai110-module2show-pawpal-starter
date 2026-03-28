@@ -4,8 +4,20 @@
 
 **a. Initial design**
 
-- Briefly describe your initial UML design.
-- What classes did you include, and what responsibilities did you assign to each?
+This design centers on four primary classes: Task, Pet, Owner, and Scheduler. The goal is to keep the domain model simple while supporting the base user actions and later adding scheduling intelligence.
+
+Three core user actions:
+
+- Add a pet: create and store pet information such as name, species, and notes.
+- Add or edit tasks for a pet: create tasks like feeding, walking, medication with time, priority, frequency.
+- View a daily schedule: aggregate tasks across pets, sorted and filtered for today, with conflict warnings.
+
+Class responsibilities:
+
+- Task: A data object representing a single activity. Holds description, time, frequency, duration, priority, and completion status. Provides methods like `mark_complete()` and `reschedule()`.
+- Pet: Keeps basic pet metadata and a collection of Task objects. It provides methods to add or remove tasks and list its tasks.
+- Owner: Manages multiple Pet objects and provides access to all pets' tasks. It provides convenience methods like `all_tasks()`.
+- Scheduler: reads tasks from an Owner and provides utilities: sorting by time, filtering by pet or status, detecting conflicts, and generating a day's schedule.
 
 **b. Design changes**
 
