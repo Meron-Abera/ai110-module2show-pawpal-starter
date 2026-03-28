@@ -19,10 +19,51 @@ Class responsibilities:
 - Owner: Manages multiple Pet objects and provides access to all pets' tasks. It provides convenience methods like `all_tasks()`.
 - Scheduler: reads tasks from an Owner and provides utilities: sorting by time, filtering by pet or status, detecting conflicts, and generating a day's schedule.
 
+Additional design notes:
+
+- I represented recurring tasks and priorities as simple attributes on `Task`.
+- I introduced a small `ScheduleItem` wrapper (task + start/end) to make overlap detection clearer and keep `Task` focused on task data rather than scheduling semantics.
+- For clarity and type safety I used a `TaskType` enum to categorize tasks (WALK, FEEDING, MEDICATION, etc.).
+
+Copilot review (asked using `#file:pawpal_system.py`):
+
+- Observations:
+	- The core relationships (Owner -> Pet -> Task) are present and explicit via `pets`, `owner_id`, and `pet_id` fields.
+	- `ScheduleItem` is a good place for overlap logic (`overlaps_with`) so `Task` remains a plain data object.
+
+- Suggested improvements / potential bottlenecks:
+	1. Recurrence detail: `Task.recurring` is currently a bool — Copilot suggested adding a recurrence specification (daily/weekly/interval) or a small Recurrence object so the Scheduler can compute next occurrences reliably.
+	2. Scheduler scope: `Scheduler.generate_daily_plan` currently accepts a single `Pet`. For owner-level schedules you will need a Scheduler method that aggregates across an `Owner`'s pets (or give Scheduler an `owner_ref`).
+	3. Task lookup and IDs: methods that find/remove tasks by id will scan lists O(n). For larger data sets, an index (dict mapping id -> Task) or keeping tasks in a dict would be more efficient.
+	4. Time handling and timezones: Copilot recommended normalizing times to timezone-aware datetimes and validating `due_date` formats early to avoid surprises when sorting or computing recurrences.
+	5. Persistence hooks: add `to_dict()`/`from_dict()` implementations early to simplify future save/load logic (JSON persistence).
+	6. Conflict resolution complexity: current stubs imply a hardcoded strategy — Copilot advised making the conflict strategy pluggable or at least documenting the v1 strategy (warn, then manual resolution).
+
+These observations helped me prioritize the next concrete changes (see 1b).
+
 **b. Design changes**
 
-- Did your design change during implementation?
-- If yes, describe at least one change and why you made it.
+Yes — I made a few deliberate changes while translating the UML into code. Below are the notable edits and the reasons:
+
+1) Added `TaskType` enum
+	- Why: makes task categories explicit and reduces magic strings in code. It helps the UI and any filtering logic.
+
+2) Introduced `ScheduleItem` (task + start/end)
+	- Why: moved overlap logic out of `Task` into `ScheduleItem` so `Task` stays a pure data record. This aligns with the Single Responsibility Principle and makes conflict detection simpler.
+
+3) Included id fields and timestamps on Task, Pet, Owner
+	- Why: practical needs for lookup, removal, and future persistence/versioning; timestamps make auditing and recurrence easier.
+
+4) Kept Scheduler methods scoped per-pet for the initial skeleton but documented the need for an owner-level aggregation method
+	- Why: implementing per-pet scheduling is simpler for the v1 CLI demos. Copilot suggested either adding an `owner_ref` to Scheduler or an `aggregate` method; I deferred implementing that immediately to keep the skeleton focused and to avoid premature coupling.
+
+Planned follow-ups (based on Copilot feedback):
+
+- Replace `Task.recurring: bool` with a small recurrence spec (enum or Recurrence dataclass) so `mark_complete()` can compute next occurrences safely.
+- Implement `to_dict()` / `from_dict()` on dataclasses and add a simple JSON persistence helper on `Owner` to support Challenge 2 (persistence).
+- Add an index (dict) in `Owner` for fast task/pet lookup if tests show performance problems.
+
+If you'd like, I can implement the recurrence spec and owner-level Scheduler aggregation next — which of these should I prioritize for the next edit?
 
 ---
 
