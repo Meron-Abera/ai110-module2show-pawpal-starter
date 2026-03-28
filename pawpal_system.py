@@ -41,7 +41,6 @@ class Task:
         If the task is recurring, return a new Task representing the
         next occurrence. Otherwise return None.
         """
-        # mark this task complete and return a new Task for recurring items
         self.completed = True
         self.updated_at = datetime.now()
         if self.recurring and self.due_date:
@@ -73,6 +72,7 @@ class Task:
         return self.due_date.date() == on_date
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialize Task to a plain dictionary (JSON-safe types)."""
         return {
             "id": self.id,
             "pet_id": self.pet_id,
@@ -89,6 +89,7 @@ class Task:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Task":
+        """Create a Task instance from a dictionary (expects ISO datetimes)."""
         due = None
         if data.get("due_date"):
             due = datetime.fromisoformat(data["due_date"])  # simple ISO parsing
@@ -143,6 +144,7 @@ class Pet:
         return result
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialize Pet and its tasks to a dictionary."""
         return {
             "id": self.id,
             "owner_id": self.owner_id,
@@ -155,6 +157,7 @@ class Pet:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Pet":
+        """Create a Pet (and nested Tasks) from a dictionary."""
         pet = cls(
             id=data["id"],
             owner_id=data.get("owner_id", ""),
@@ -200,6 +203,7 @@ class Owner:
         return tasks
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialize Owner (and nested Pets) to a dictionary."""
         return {
             "id": self.id,
             "name": self.name,
@@ -210,6 +214,7 @@ class Owner:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Owner":
+        """Create an Owner (and nested Pets) from a dictionary."""
         owner = cls(id=data["id"], name=data.get("name", ""), email=data.get("email"))
         owner.preferences = data.get("preferences", {})
         for pdata in data.get("pets", []):
