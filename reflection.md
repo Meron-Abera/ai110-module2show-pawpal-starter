@@ -63,8 +63,6 @@ Planned follow-ups (based on Copilot feedback):
 - Implement `to_dict()` / `from_dict()` on dataclasses and add a simple JSON persistence helper on `Owner` to support Challenge 2 (persistence).
 - Add an index (dict) in `Owner` for fast task/pet lookup if tests show performance problems.
 
-If you'd like, I can implement the recurrence spec and owner-level Scheduler aggregation next — which of these should I prioritize for the next edit?
-
 ---
 
 ## 2. Scheduling Logic and Tradeoffs
@@ -78,6 +76,12 @@ If you'd like, I can implement the recurrence spec and owner-level Scheduler agg
 
 - Describe one tradeoff your scheduler makes.
 - Why is that tradeoff reasonable for this scenario?
+
+One tradeoff I made in the scheduler was keeping conflict detection simple instead of trying to automatically fix everything. Right now, it just flags exact start-time conflicts and shows overlapping tasks as warnings, instead of rescheduling them on its own. I did this on purpose it keeps the system predictable and easy to understand, especially for a CLI/demo version. Users can trust that their tasks won’t be changed behind the scenes.
+
+The downside is that it’s not perfect. It can miss edge cases, like tasks that almost overlap but don’t technically conflict, and it doesn’t take into account user preferences for which task should move. It also puts the responsibility on the user to resolve conflicts instead of handling it automatically.
+
+I think this is a reasonable tradeoff for v1. For a pet-owner scheduling tool, trust and transparency matter more than automation early on. It’s better for users to see what’s happening and make the decision themselves. Later, we can introduce smarter features like priority-based rescheduling or time constraints once we have more data and a better sense of what users actually want.
 
 ---
 

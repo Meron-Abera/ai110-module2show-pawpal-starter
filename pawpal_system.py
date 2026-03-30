@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, date, time, timedelta
 from enum import Enum
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from uuid import uuid4
 
 
@@ -31,7 +31,10 @@ class Task:
     duration_minutes: int = 0
     completed: bool = False
     due_date: Optional[datetime] = None
+    # recurring kept for backward compatibility (boolean), but prefer using
+    # `recurrence` to specify 'daily' or 'weekly' recurrence rules.
     recurring: bool = False
+    recurrence: Optional[str] = None  # e.g. 'daily' or 'weekly'
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
@@ -43,9 +46,25 @@ class Task:
         """
         self.completed = True
         self.updated_at = datetime.now()
-        if self.recurring and self.due_date:
-            # simple daily recurrence for v1
-            next_due = self.due_date + timedelta(days=1)
+        # Determine recurrence rule. Backwards-compat: if `recurrence` is not
+        # set but `recurring==True`, assume daily recurrence.
+        rule = self.recurrence
+        if not rule and self.recurring:
+            rule = "daily"
+
+        if rule and self.due_date:
+            # Use timedelta to compute next occurrence accurately:
+            # - daily -> +1 day
+            # - weekly -> +7 days
+            # If more rules are added later, extend here.
+            if rule == "daily":
+                next_due = self.due_date + timedelta(days=1)
+            elif rule == "weekly":
+                next_due = self.due_date + timedelta(days=7)
+            else:
+                # Unknown recurrence rule — do not auto-create.
+                return None
+
             new_task = Task(
                 id=str(uuid4()),
                 pet_id=self.pet_id,
@@ -55,7 +74,8 @@ class Task:
                 duration_minutes=self.duration_minutes,
                 completed=False,
                 due_date=next_due,
-                recurring=self.recurring,
+                recurring=bool(rule),
+                recurrence=rule,
             )
             return new_task
         return None
@@ -83,6 +103,7 @@ class Task:
             "completed": self.completed,
             "due_date": self.due_date.isoformat() if self.due_date else None,
             "recurring": self.recurring,
+            "recurrence": self.recurrence,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
@@ -103,6 +124,7 @@ class Task:
             completed=bool(data.get("completed", False)),
             due_date=due,
             recurring=bool(data.get("recurring", False)),
+            recurrence=data.get("recurrence"),
         )
 
 
@@ -227,6 +249,8 @@ class ScheduleItem:
     task: Task
     start_time: datetime
     end_time: datetime
+    # include pet_name to avoid mutating Task.pet_id when presenting schedules
+    pet_name: Optional[str] = None
 
     def overlaps_with(self, other: "ScheduleItem") -> bool:
         """Return True if this schedule item overlaps the other."""
@@ -248,9 +272,9 @@ class Scheduler:
         self.day_start = day_start
         self.day_end = day_end
 
-    def generate_daily_plan(self, pet: Pet, for_date: date) -> List[ScheduleItem]:
+    def generate_daily_plan(self, pet: Pet, for_date: date, status_filter: Optional[str] = "pending") -> List[ScheduleItem]:
         """Produce a list of ScheduleItem objects for one pet on a date."""
-        tasks = pet.get_tasks(filter={"date": for_date, "status": "pending"})
+        tasks = pet.get_tasks(filter={"date": for_date, "status": status_filter})
         items: List[ScheduleItem] = []
         for t in tasks:
             if not t.due_date:
@@ -258,11 +282,44 @@ class Scheduler:
             start = t.due_date
             duration = t.duration_minutes or 30
             end = start + timedelta(minutes=duration)
-            items.append(ScheduleItem(task=t, start_time=start, end_time=end))
+            items.append(ScheduleItem(task=t, start_time=start, end_time=end, pet_name=pet.name))
         # basic resolution: sort and then attempt to resolve collisions
         items = sorted(items, key=lambda i: i.start_time)
         items = self.resolve_conflicts(items)
         return items
+
+    def generate_owner_plan(self, owner: "Owner", for_date: date,
+                            pet_filter: Optional[str] = None,
+                            status_filter: Optional[str] = "pending") -> Tuple[List[ScheduleItem], List[List[ScheduleItem]]]:
+        """Produce a combined, sorted schedule for an Owner across pets.
+
+        Args:
+            owner: Owner whose pets' tasks will be aggregated.
+            for_date: date for which to generate the plan.
+            pet_filter: optional pet id or pet name (case-insensitive) to limit results.
+            status_filter: optional status filter matching Pet.get_tasks values
+                ("pending" or "completed"). Defaults to "pending".
+
+        Returns:
+            A tuple (items, conflict_groups) where `items` is a list of
+            ScheduleItem objects sorted by start_time and `conflict_groups`
+            is a list of groups (each group a list of ScheduleItems) that
+            overlap according to `detect_conflicts`.
+        """
+        items: List[ScheduleItem] = []
+        for p in owner.pets:
+            if pet_filter:
+                pf = pet_filter.lower()
+                if not (p.id == pet_filter or p.name.lower() == pf):
+                    continue
+            items.extend(self.generate_daily_plan(p, for_date, status_filter=status_filter))
+
+        # owner-level sorting
+        items = sorted(items, key=lambda i: i.start_time)
+
+        # detect conflicts across pets
+        conflict_groups = self.detect_conflicts(items)
+        return items, conflict_groups
 
     def score_task(self, task: Task) -> int:
         """Return an integer score used when ordering tasks."""
@@ -290,6 +347,53 @@ class Scheduler:
         """Return tasks sorted by time/priority (stable)."""
         return sorted(tasks, key=lambda t: (-int(t.priority), t.due_date or datetime.max))
 
+    def sort_by_time(self, tasks: List[Task]) -> List[Task]:
+        """Return tasks sorted by their due time (time-of-day).
+
+        Tasks without a `due_date` are placed at the end of the list. The
+        sort key uses the task's `due_date.time()` where available so that
+        ordering is by clock time (HH:MM) regardless of the date component.
+
+        Args:
+            tasks: list of Task objects to sort.
+
+        Returns:
+            A new list of Task objects sorted by time-of-day.
+        """
+        return sorted(tasks, key=lambda t: (t.due_date.time() if t.due_date else time(23, 59)))
+
+    def filter_tasks(self, tasks: List[Task], owner: Optional["Owner"] = None,
+                     pet_name: Optional[str] = None, status: Optional[str] = None) -> List[Task]:
+        """Filter a list of Task objects by pet name and/or completion status.
+
+        Args:
+            tasks: list of Task objects to filter.
+            owner: optional Owner required when filtering by `pet_name` so
+                that pet names can be mapped to pet ids.
+            pet_name: optional pet name to include (case-insensitive).
+            status: optional status string, either 'pending' or 'completed'.
+
+        Returns:
+            A filtered list of Task objects matching the provided criteria.
+        """
+        result = list(tasks)
+        if status:
+            if status == "completed":
+                result = [t for t in result if t.completed]
+            elif status == "pending":
+                result = [t for t in result if not t.completed]
+
+        if pet_name:
+            if not owner:
+                # can't map names without owner; return empty list to signal misuse
+                return []
+            pn = pet_name.lower()
+            pet_map = {p.id: p.name.lower() for p in owner.pets}
+            allowed_ids = [pid for pid, name in pet_map.items() if name == pn]
+            result = [t for t in result if t.pet_id in allowed_ids]
+
+        return result
+
     def detect_conflicts(self, items: List[ScheduleItem]) -> List[List[ScheduleItem]]:
         """Return groups of ScheduleItems that conflict with each other."""
         if not items:
@@ -308,6 +412,55 @@ class Scheduler:
         if len(current_group) > 1:
             groups.append(current_group)
         return groups
+
+    def generate_conflict_warnings(self, items: List[ScheduleItem]) -> List[str]:
+        """Generate human-friendly warning messages describing schedule conflicts.
+
+        This is a lightweight conflict detection helper intended for UI/CLI
+        presentation. It does not modify tasks or schedules; it returns
+        strings that callers can display to users.
+
+        The current strategy reports two kinds of warnings:
+        1. Exact-start collisions: two or more ScheduleItems with identical
+           `start_time` values.
+        2. Overlapping groups: any groups found by `detect_conflicts`.
+
+        Args:
+            items: list of ScheduleItem objects to analyze.
+
+        Returns:
+            A list of formatted warning strings (empty if no issues found).
+        """
+        warnings: List[str] = []
+        if not items:
+            return warnings
+
+        # Exact same start_time collisions
+        start_map: Dict[datetime, List[ScheduleItem]] = {}
+        for it in items:
+            start_map.setdefault(it.start_time, []).append(it)
+
+        for st, group in start_map.items():
+            if len(group) > 1:
+                pets = [g.pet_name or g.task.pet_id for g in group]
+                descs = [g.task.description for g in group]
+                warnings.append(
+                    f"{len(group)} tasks start at the same time {st.strftime('%Y-%m-%d %H:%M')}: "
+                    + "; ".join([f"{p}: {d}" for p, d in zip(pets, descs)])
+                )
+
+        # Overlapping groups (non-exact overlaps)
+        groups = self.detect_conflicts(items)
+        for group in groups:
+            # present a compact summary: earliest start - latest end, with involved pets
+            earliest = min(g.start_time for g in group)
+            latest = max(g.end_time for g in group)
+            pets = {g.pet_name or g.task.pet_id for g in group}
+            warnings.append(
+                f"Overlap between {len(group)} tasks from {earliest.strftime('%H:%M')} to {latest.strftime('%H:%M')} (pets: {', '.join(pets)})"
+            )
+
+        return warnings
 
     def resolve_conflicts(self, items: List[ScheduleItem]) -> List[ScheduleItem]:
         """Attempt to resolve conflicts and return an adjusted schedule."""
