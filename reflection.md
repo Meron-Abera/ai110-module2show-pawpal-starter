@@ -89,13 +89,26 @@ I think this is a reasonable tradeoff for v1. For a pet-owner scheduling tool, t
 
 **a. How you used AI**
 
-- How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
-- What kinds of prompts or questions were most helpful?
+- Design brainstorming: I used AI to iterate on the UML and to suggest alternative layouts for responsibilities (for example, moving overlap logic off Task and into a ScheduleItem wrapper).
+- Implementation scaffolding: Copilot helped create method stubs, docstrings, and small helper functions (`to_dict`/`from_dict`) so I could focus on the core scheduling logic.
+- Refactoring and exploration: While implementing `Scheduler` I asked for suggestions about conflict detection strategies and got a list of possible approaches (naive shift, backtracking search, optimization-based packing). That helped me pick a simple, explainable v1 approach.
+- Tests: Copilot-style completions made writing small unit tests faster (it suggested test structure and assertions that I adapted).
+
+Helpful prompts and questions:
+- "Show an example implementation for detecting overlapping time intervals in Python." (led to `detect_conflicts` design)
+- "How to safely create the next occurrence of a recurring task (daily/weekly)?" (guided `mark_complete` behavior)
+- "Show me small pytest tests that assert task ordering by priority and time." (gave a starting point for the test file)
 
 **b. Judgment and verification**
 
-- Describe one moment where you did not accept an AI suggestion as-is.
-- How did you evaluate or verify what the AI suggested?
+- One suggestion I rejected/modified: Copilot frequently suggested automatically resolving conflicts by reordering tasks (changing their scheduled times) without user confirmation. I rejected the fully-automatic variant and instead implemented a non-destructive suggestion flow: `resolve_conflicts` returns adjusted ScheduleItems and the UI presents them as suggestions the owner can accept. I rejected the auto-mutate behavior because it would silently change the user's plan and reduce trust.
+
+- Another modification: Copilot recommended introducing a full Recurrence object immediately. I kept recurrence as a small, explicit rule (`recurrence` = 'daily' | 'weekly') for v1 so the behavior is easy to reason about and test; I documented plans to refactor into a richer recurrence model later.
+
+- How I verified AI suggestions: for any substantive suggestion I ran the following checks before accepting it:
+	1. Unit testability — can the idea be exercised in a small unit test? I wrote tests for sorting, recurrence, and conflict detection.
+ 2. Principle check — does the suggestion respect single responsibility and avoid surprising side effects? If a suggestion would mutate user data implicitly, I rejected or modified it.
+ 3. Simplicity and transparency — prefer the simpler, more explainable approach for v1 and document the design tradeoffs.
 
 ---
 
@@ -106,10 +119,30 @@ I think this is a reasonable tradeoff for v1. For a pet-owner scheduling tool, t
 - What behaviors did you test?
 - Why were these tests important?
 
+I focused testing on the behaviors that are central to the scheduler's correctness and to user trust:
+
+- Recurrence behavior: that marking a recurring task complete creates a new Task for the next occurrence (daily/weekly). This ensures repeating care items (meds, walks) continue to appear.
+- Sorting and ordering: that the scheduler orders tasks by priority first and by time when priorities match. This ensures owners see the most important tasks first.
+- Conflict detection/resolution: that detect_conflicts finds overlapping items and that resolve_conflicts produces shifted suggestions where appropriate.
+
+These tests are important because they validate the contract between the model and the UI: predictable ordering, correct recurrence behavior, and transparent conflict handling are essential for trust in a scheduling tool.
+
 **b. Confidence**
 
 - How confident are you that your scheduler works correctly?
 - What edge cases would you test next if you had more time?
+
+Confidence: moderate-high for the current scope (single-owner, small task sets, simple recurrence rules). The unit tests cover the core white-box behaviors and the app demonstrates the flows end-to-end.
+
+Edge cases to test next:
+
+- Many overlapping tasks across several pets (stress test the conflict grouping and the suggestion algorithm).
+- Tasks that span midnight or have very long durations (ensure day boundaries are respected).
+- Timezone and DST transitions (ensure due_date handling remains correct across offsets).
+- Complex recurrence rules (exceptions, monthly rules, or patterns like "every 2 days").
+- Concurrent edits (if the app were multi-user or persisted to a shared DB).
+
+## 5. Reflection
 
 ---
 
@@ -119,10 +152,24 @@ I think this is a reasonable tradeoff for v1. For a pet-owner scheduling tool, t
 
 - What part of this project are you most satisfied with?
 
+I am most satisfied with producing a focused, well-tested core scheduler API (`pawpal_system.py`) and wiring a clear Streamlit demo UI that exposes the important flows: add task, generate schedule, view conflicts, accept suggestions. Keeping the core design small and testable made it straightforward to iterate safely.
+
 **b. What you would improve**
 
 - If you had another iteration, what would you improve or redesign?
 
+Key improvements I would prioritize in a next iteration:
+
+- Richer recurrence model (Recurrence dataclass or rrule-like support).
+- A pluggable conflict-resolution strategy (so the app can switch between "suggest only", "auto-resolve low-priority items", or "optimization-based packing").
+- Persistence: persist Owner/Pet/Task records so schedules survive restarts and support multi-session testing.
+- Session-state undo for applied adjustments (so owners can revert mistakes).
+
+
 **c. Key takeaway**
 
 - What is one important thing you learned about designing systems or working with AI on this project?
+
+Working with AI (Copilot-style tools) is most effective when you treat suggestions as a teammate rather than an oracle: accept scaffolded code and ideas when they improve productivity, but apply human judgment for design tradeoffs, testing, and user trust. As the lead architect you must set the system contract (inputs/outputs, side-effect policy, and error handling) and use AI to accelerate implementation within that contract. Small, testable increments + explicit decision notes (README/U ML/reflection) make it easy to iterate safely.
+
+
