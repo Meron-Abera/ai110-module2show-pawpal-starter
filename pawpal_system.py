@@ -28,6 +28,8 @@ class Task:
     description: str
     task_type: TaskType
     priority: int = 0
+    # human-friendly priority label (e.g. 'low', 'medium', 'high') kept for UI display
+    priority_label: Optional[str] = None
     duration_minutes: int = 0
     completed: bool = False
     due_date: Optional[datetime] = None
@@ -104,6 +106,7 @@ class Task:
             "due_date": self.due_date.isoformat() if self.due_date else None,
             "recurring": self.recurring,
             "recurrence": self.recurrence,
+            "priority_label": self.priority_label,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
@@ -120,6 +123,7 @@ class Task:
             description=data.get("description", ""),
             task_type=TaskType(data.get("task_type", "WALK")),
             priority=int(data.get("priority", 0)),
+            priority_label=data.get("priority_label"),
             duration_minutes=int(data.get("duration_minutes", 0)),
             completed=bool(data.get("completed", False)),
             due_date=due,
@@ -283,8 +287,8 @@ class Scheduler:
             duration = t.duration_minutes or 30
             end = start + timedelta(minutes=duration)
             items.append(ScheduleItem(task=t, start_time=start, end_time=end, pet_name=pet.name))
-        # basic resolution: sort and then attempt to resolve collisions
-        items = sorted(items, key=lambda i: i.start_time)
+        # basic resolution: sort by priority (desc) then start time and then attempt to resolve collisions
+        items = sorted(items, key=lambda i: (-int(i.task.priority), i.start_time))
         items = self.resolve_conflicts(items)
         return items
 
@@ -314,8 +318,8 @@ class Scheduler:
                     continue
             items.extend(self.generate_daily_plan(p, for_date, status_filter=status_filter))
 
-        # owner-level sorting
-        items = sorted(items, key=lambda i: i.start_time)
+        # owner-level sorting: prioritize higher-priority tasks first, then by start time
+        items = sorted(items, key=lambda i: (-int(i.task.priority), i.start_time))
 
         # detect conflicts across pets
         conflict_groups = self.detect_conflicts(items)
@@ -466,7 +470,10 @@ class Scheduler:
         """Attempt to resolve conflicts and return an adjusted schedule."""
         if not items:
             return []
-        items = sorted(items, key=lambda i: i.start_time)
+        # Do not reorder items here; respect the ordering provided by the
+        # caller (which may be priority-first). Only adjust overlapping
+        # items by shifting them forward. Sorting here would erase the
+        # caller's ordering (e.g., priority-based sorting), so avoid it.
         resolved: List[ScheduleItem] = [items[0]]
         for item in items[1:]:
             prev = resolved[-1]

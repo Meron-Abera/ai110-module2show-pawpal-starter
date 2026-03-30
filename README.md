@@ -14,6 +14,22 @@ Your job is to design the system first (UML), then implement the logic in Python
 
 ## What you will build
 
+# PawPal+ (Module 2 Project)
+
+You are building **PawPal+**, a Streamlit app that helps a pet owner plan care tasks for their pet.
+
+## Scenario
+
+A busy pet owner needs help staying consistent with pet care. They want an assistant that can:
+
+- Track pet care tasks (walks, feeding, meds, enrichment, grooming, etc.)
+- Consider constraints (time available, priority, owner preferences)
+- Produce a daily plan and explain why it chose that plan
+
+Your job is to design the system first (UML), then implement the logic in Python, then connect it to the Streamlit UI.
+
+## What you will build
+
 Your final app should:
 
 - Let a user enter basic owner + pet info
@@ -56,3 +72,20 @@ more useful for a pet owner (implemented in `pawpal_system.py`):
 
 See `main.py` for a small CLI-style demo that shows the sorted schedule,
 unsorted input, filtering examples, and conflict warnings.
+
+## Testing PawPal+
+
+Run the test suite for this project with:
+
+```bash
+python -m pytest
+```
+
+What the tests cover
+- Sorting correctness: tasks are ordered by priority (High > Medium > Low) and then by time-of-day when priorities match.
+- Recurrence logic: marking a recurring task complete creates the next occurrence (daily/weekly where applicable).
+- Conflict detection: the Scheduler detects exact-start collisions and overlapping tasks and produces human-readable warnings.
+
+Confidence Level: ★★★★☆ (4/5)
+
+Notes: tests currently exercise core scheduler behaviors but not the Streamlit UI; a higher confidence level would require end-to-end and integration tests for the UI and persistence layer.
